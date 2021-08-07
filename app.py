@@ -25,7 +25,6 @@ app.config['result_backend'] = environ.get('REDIS_URL')
 # Initialize Celery
 celery = Celery(app.name, broker=app.config['broker_url'])
 celery.conf.update(app.config)
-print (app.config)
 
 
 
@@ -93,9 +92,12 @@ def scraper_nit(driver, nit):
 def long_task(self):
     """Background task that runs a long function with progress reports."""
     chrome_options = Options()
+    chrome_options.binary_location = environ.get("GOOGLE_CHROME_BIN")
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--window-size=1920,1080")
-    driver = webdriver.Chrome(executable_path='./chromedriver', options=chrome_options)
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--no-sandbox")
+    driver = webdriver.Chrome(executable_path=environ.get("CHROMEDRIVER_PATH"), chrome_options=chrome_options)
     driver.get("https://portal.sat.gob.gt/portal/verificador-integrado/")
     time.sleep(0.5)
 
