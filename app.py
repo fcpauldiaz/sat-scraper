@@ -1,7 +1,7 @@
 import os
 import time
 import random
-from flask import Flask, request, render_template, session, flash, redirect, url_for, jsonify
+from flask import Flask, render_template, url_for, jsonify
 from celery import Celery
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -114,7 +114,7 @@ def long_task(self):
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template('index.html'))
+    return render_template('index.html')
 
 
 
