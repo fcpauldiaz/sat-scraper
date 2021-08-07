@@ -106,9 +106,10 @@ def long_task(self):
         messages = scraper_initial_captcha(driver)
 
     time.sleep(0.5)
+    self.update_state(state='PROGRESS', meta={'current': 50, 'total': 100,'status': "nit"})
     results = scraper_nit(driver, "84797428")
-    
-    return {'results': results}
+    return {'current': 100, 'total': 100, 'status': 'Task completed!',
+            'result': results}
 
 
 @app.route('/', methods=['GET', 'POST'])
