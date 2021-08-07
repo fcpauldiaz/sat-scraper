@@ -39,7 +39,7 @@
                 type: 'POST',
                 url: '/longtask',
                 success: function(data, status, request) {
-                    status_url = request.getResponseHeader('Location');
+                    status_url = request.getResponseHeader('Status');
                     update_progress(status_url, nanobar, div[0]);
                 },
                 error: function() {
