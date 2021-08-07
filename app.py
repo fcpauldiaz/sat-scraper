@@ -6,6 +6,7 @@ from celery import Celery
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
+from dotenv import load_dotenv
 from os import environ
 import time 
 import base64
@@ -14,7 +15,7 @@ from captcha_solver import CaptchaSolver
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = environ.get('SECRET_KEY')
-
+load_dotenv()
 
 
 # Celery configuration
@@ -24,7 +25,7 @@ app.config['result_backend'] = environ.get('REDIS_URL')
 # Initialize Celery
 celery = Celery(app.name, broker=app.config['broker_url'])
 celery.conf.update(app.config)
-
+print (app.config)
 
 
 
