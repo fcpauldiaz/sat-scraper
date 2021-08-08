@@ -3,6 +3,7 @@ import time
 import random
 from flask import Flask, render_template, url_for, jsonify
 from celery import Celery
+from celery.signals import task_success, after_task_publish
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
@@ -11,19 +12,43 @@ from os import environ
 import time 
 import base64
 from captcha_solver import CaptchaSolver
+import redis
 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = environ.get('SECRET_KEY')
 load_dotenv()
 
-
 # Celery configuration
-app.config['broker_url'] = environ.get('REDIS_URL')
-app.config['result_backend'] = environ.get('REDIS_URL')
+app.config['broker_url'] = environ.get('REDISCLOUD_URL')
+app.config['result_backend'] = environ.get('REDISCLOUD_URL')
+app.config['redis_max_connections'] = int(environ.get('REDIS_MAX_CONNECTIONS'))
+app.config['broker_pool_limit'] = 0
+
+"""
+redis_db = redis.Redis.from_url(environ.get('REDISCLOUD_URL'))
+all_clients = redis_db.client_list()
+print (len(all_clients))
+counter = 0
+
+for client in all_clients:
+    print (client)
+    if int(client['idle']) >= 15:
+        try:
+            redis_db.client_kill(client['addr'])
+        except:
+            pass
+        counter += 1
+
+    print ('killing idle clients:', counter)
+"""
 
 # Initialize Celery
-celery = Celery(app.name, broker=app.config['broker_url'])
+celery = Celery(app.name, broker=app.config['broker_url'],
+    redis_max_connections=app.config['redis_max_connections'],
+    BROKER_TRANSPORT_OPTIONS = {
+        'max_connections': app.config['redis_max_connections'],
+    })
 celery.conf.update(app.config)
 
 
@@ -90,14 +115,18 @@ def scraper_nit(driver, nit):
 
 @celery.task(bind=True)
 def long_task(self):
-    """Background task that runs a long function with progress reports."""
+    """Background tasks"""
     chrome_options = Options()
-    chrome_options.binary_location = environ.get("GOOGLE_CHROME_BIN")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--no-sandbox")
-    driver = webdriver.Chrome(executable_path=environ.get("CHROMEDRIVER_PATH"), chrome_options=chrome_options)
+    if 'DYNO' in os.environ:
+        chrome_options.binary_location = environ.get("GOOGLE_CHROME_BIN")
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--no-sandbox")
+    if 'DYNO' in os.environ:
+        driver = webdriver.Chrome(executable_path=environ.get("CHROMEDRIVER_PATH"), chrome_options=chrome_options)
+    else:
+        driver = webdriver.Chrome()
     driver.get("https://portal.sat.gob.gt/portal/verificador-integrado/")
     time.sleep(0.5)
 
@@ -111,6 +140,9 @@ def long_task(self):
     return {'current': 100, 'total': 100, 'status': 'Task completed!',
             'result': results}
 
+@task_success.connect
+def task_success_handler(sender, result,  **kwargs):
+    print (sender, result)
 
 @app.route('/', methods=['GET'])
 def index():
@@ -155,6 +187,6 @@ def taskstatus(task_id):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)
 
 

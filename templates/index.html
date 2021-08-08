@@ -1,6 +1,6 @@
 <html>
   <head>
-    <title>Flask + Celery Examples</title>
+    <title>Scraper</title>
     <style>
         .progress {
             width: 100%;
@@ -9,15 +9,13 @@
     </style>
   </head>
   <body>
-    <h1>Flask + Celery Examples</h1>
-    <h2>Example 1: Send Asynchronous Email</h2>
     {% for message in get_flashed_messages() %}
     <p style="color: red;">{{ message }}</p>
     {% endfor %}
+  
+    <h2>Scraper</h2>
     <hr>
-    <h2>Example 2: Long running task with progress updates</h2>
-    <!--<button onclick="start_long_task();">Start Long Calculation</button><br><br>-->
-    <button id="start-bg-job">Start Long Calculation</button><br><br>
+    <button id="start-bg-job">Start Example Scrap</button><br><br>
     <div id="progress"></div>
 
     <script src="//cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
