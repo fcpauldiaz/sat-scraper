@@ -49,7 +49,7 @@
             // send GET request to status URL
             $.getJSON(status_url, function(data) {
                 // update UI
-                percent = parseInt(data['current'] * 100 / data['total']);
+                percent = parseInt(data['progress']);
                 nanobar.go(percent);
                 $(status_div.childNodes[1]).text(percent + '%');
                 $(status_div.childNodes[2]).text(data['status']);

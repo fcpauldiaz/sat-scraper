@@ -1,7 +1,7 @@
 import os
 import time
 import random
-from flask import Flask, render_template, url_for, jsonify
+from flask import Flask, render_template, request, url_for, jsonify
 from celery import Celery
 from celery.signals import task_success, after_task_publish
 from selenium import webdriver
@@ -25,43 +25,40 @@ app.config['result_backend'] = environ.get('REDISCLOUD_URL')
 app.config['redis_max_connections'] = int(environ.get('REDIS_MAX_CONNECTIONS'))
 app.config['broker_pool_limit'] = 0
 
-"""
-redis_db = redis.Redis.from_url(environ.get('REDISCLOUD_URL'))
-all_clients = redis_db.client_list()
-print (len(all_clients))
-counter = 0
+def get_redis():
+    r = redis.Redis.from_url(environ.get('REDISCLOUD_URL'))
+    return r
 
-for client in all_clients:
-    print (client)
-    if int(client['idle']) >= 15:
-        try:
-            redis_db.client_kill(client['addr'])
-        except:
-            pass
-        counter += 1
+def close_connections(redis_db):
+    all_clients = redis_db.client_list()
+    counter = 0
 
-    print ('killing idle clients:', counter)
-"""
+    for client in all_clients:
+        if int(client['idle']) >= 15:
+            try:    
+                redis_db.client_kill(client['addr'])
+            except:
+                pass
+            counter += 1
 
 # Initialize Celery
 celery = Celery(app.name, broker=app.config['broker_url'],
     redis_max_connections=app.config['redis_max_connections'],
     BROKER_TRANSPORT_OPTIONS = {
         'max_connections': app.config['redis_max_connections'],
-    })
+    }, broker_pool_limit=0)
 celery.conf.update(app.config)
 
 
 
 def sendKeys(elem, string):
     for letter in string:
-        time.sleep(0.5)
+        time.sleep(0.4)
         elem.send_keys(letter)
 
 
 def scraper_initial_captcha(driver):
     driver.get("https://portal.sat.gob.gt/portal/verificador-integrado/")
-    time.sleep(0.5)
     driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
     element_image = driver.find_element_by_id("formContent:j_idt28")
     # get the captcha as a base64 string
@@ -82,22 +79,39 @@ def scraper_initial_captcha(driver):
     input_element = driver.find_element_by_id("formContent:j_idt30")
     sendKeys(input_element, captcha_solution)
     input_element.send_keys(Keys.ENTER)
-    time.sleep(0.6)
+    time.sleep(0.5)
     messages = driver.find_element_by_id("formContent:msg")
     return messages
 
 
 def scraper_nit(driver, nit):
-    driver.find_element_by_id("formContent:selTipoConsulta_label").click()
+    results = []
+    label = None
+    try:
+        label = driver.find_element_by_id("formContent:selTipoConsulta_label")
+    except:
+        new_query = None
+        try:
+            time.sleep(0.5)
+            driver.switch_to.parent_frame()
+            new_query = driver.find_element_by_id("formContent:btnNuevaConsulta")
+            new_query.click()
+            time.sleep(1)
+            label = driver.find_element_by_id("formContent:selTipoConsulta_label")
+        except Exception as e:
+            print (str(e))
+            pass
+    if (label == None):
+        return results
+    label.click()
     driver.find_element_by_id("formContent:selTipoConsulta_2").click()
     time.sleep(0.5)
     driver.find_element_by_id("formContent:pNitEmi").send_keys(nit)
     time.sleep(0.2)
     driver.find_element_by_xpath('//span[text()="Buscar"]').click()
-    time.sleep(1.5)
+    time.sleep(1)
     driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
     result = driver.find_element_by_id("formContent:j_idt19")
-    results = []
     if "NO" in result.text:
         pass
     else:
@@ -113,8 +127,8 @@ def scraper_nit(driver, nit):
                 pass
     return results
 
-@celery.task(bind=True)
-def long_task(self):
+@celery.task(bind=True, autoretry_for=(Exception,), retry_backoff=2)
+def scraper_task(self, nit_list):
     """Background tasks"""
     chrome_options = Options()
     if 'DYNO' in os.environ:
@@ -127,18 +141,20 @@ def long_task(self):
         driver = webdriver.Chrome(executable_path=environ.get("CHROMEDRIVER_PATH"), chrome_options=chrome_options)
     else:
         driver = webdriver.Chrome()
-    driver.get("https://portal.sat.gob.gt/portal/verificador-integrado/")
-    time.sleep(0.5)
-
     messages = scraper_initial_captcha(driver)
     while (len(messages.find_elements_by_xpath(".//*")) > 0):
         messages = scraper_initial_captcha(driver)
 
-    time.sleep(0.5)
-    self.update_state(state='PROGRESS', meta={'current': 50, 'total': 100,'status': "nit"})
-    results = scraper_nit(driver, "84797428")
-    return {'current': 100, 'total': 100, 'status': 'Task completed!',
-            'result': results}
+    count = 0
+    results = []
+    for nit in nit_list:
+        print (nit)
+        self.update_state(state='PROGRESS', meta={'progress': int(count/len(nit_list)), "nit": nit})
+        result = scraper_nit(driver,  nit)
+        results.append({ 'result': result, 'nit': nit })
+        count += 1
+    driver.quit()
+    return {'progress': 100, 'result': results}
 
 @task_success.connect
 def task_success_handler(sender, result,  **kwargs):
@@ -149,28 +165,29 @@ def index():
     return render_template('index.html')
 
 
-
-@app.route('/longtask', methods=['POST'])
-def longtask():
-    task = long_task.apply_async()
-    return jsonify({}), 201, {'status': url_for('taskstatus', task_id=task.id)}
+@app.route('/scraper', methods=['POST'])
+def api_scraper():
+    data = request.get_json(force=True)
+    nit_list = data.get('nit')
+    if nit_list is None:
+        return { 'error': 'missing nit'}, 400
+    task = scraper_task.apply_async([nit_list])
+    return {'status_url': url_for('taskstatus', task_id=task.id)}
 
 
 @app.route('/status/<task_id>')
 def taskstatus(task_id):
-    task = long_task.AsyncResult(task_id)
+    task = scraper_task.AsyncResult(task_id)
     if task.state == 'PENDING':
         response = {
             'state': task.state,
-            'current': 0,
-            'total': 1,
+            'progress': 0,
             'status': 'Pending...'
         }
     elif task.state != 'FAILURE':
         response = {
             'state': task.state,
-            'current': task.info.get('current', 0),
-            'total': task.info.get('total', 1),
+            'progress': task.info.get('progress', 0),
             'status': task.info.get('status', '')
         }
         if 'result' in task.info:
@@ -179,14 +196,12 @@ def taskstatus(task_id):
         # something went wrong in the background job
         response = {
             'state': task.state,
-            'current': 1,
-            'total': 1,
             'status': str(task.info),  # this is the exception raised
         }
     return jsonify(response)
 
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)
 
 
