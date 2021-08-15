@@ -157,8 +157,16 @@ def scraper_task(self, nit_list):
     return {'progress': 100, 'result': results}
 
 @task_success.connect
-def task_success_handler(sender, result,  **kwargs):
+def task_success_handler(sender, result, **kwargs):
     print (sender, result)
+    with app.producer_or_acquire() as producer:
+        producer.publish(
+            body=result,
+            serializer='json',
+            exchange='celery',
+            routing_key='sat-scraper-result',
+            retry=True,
+        )
 
 @app.route('/', methods=['GET'])
 def index():
