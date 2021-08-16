@@ -13,6 +13,7 @@ import time
 import base64
 from captcha_solver import CaptchaSolver
 import redis
+from kombu import Consumer, Exchange, Queue
 
 
 app = Flask(__name__)
@@ -50,7 +51,7 @@ celery = Celery(app.name, broker=app.config['broker_url'],
 celery.conf.update(app.config)
 
 
-
+my_queue = Queue('sat-scraper-result', Exchange('sat-scraper-result'), 'routing_key')
 def sendKeys(elem, string):
     for letter in string:
         time.sleep(0.4)
@@ -58,9 +59,7 @@ def sendKeys(elem, string):
 
 
 def scraper_initial_captcha(driver):
-    driver.get("https://portal.sat.gob.gt/portal/verificador-integrado/")
-    driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
-    element_image = driver.find_element_by_id("formContent:j_idt28")
+    element_image = driver.find_element_by_id("formContent:j_idt26")
     # get the captcha as a base64 string
     img_base64 = driver.execute_script("""
         var ele = arguments[0];
@@ -76,7 +75,7 @@ def scraper_initial_captcha(driver):
     raw_data = open('captcha.jpg', 'rb').read()
     captcha_solution = solver.solve_captcha(raw_data)
     print (captcha_solution)
-    input_element = driver.find_element_by_id("formContent:j_idt30")
+    input_element = driver.find_element_by_id("formContent:j_idt29")
     sendKeys(input_element, captcha_solution)
     input_element.send_keys(Keys.ENTER)
     time.sleep(0.5)
@@ -111,7 +110,7 @@ def scraper_nit(driver, nit):
     driver.find_element_by_xpath('//span[text()="Buscar"]').click()
     time.sleep(1)
     driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
-    result = driver.find_element_by_id("formContent:j_idt19")
+    result = driver.find_element_by_id("formContent:j_idt23")
     if "NO" in result.text:
         pass
     else:
@@ -127,7 +126,7 @@ def scraper_nit(driver, nit):
                 pass
     return results
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_backoff=2)
+@celery.task(bind=True)
 def scraper_task(self, nit_list):
     """Background tasks"""
     chrome_options = Options()
@@ -141,6 +140,8 @@ def scraper_task(self, nit_list):
         driver = webdriver.Chrome(executable_path=environ.get("CHROMEDRIVER_PATH"), chrome_options=chrome_options)
     else:
         driver = webdriver.Chrome()
+    driver.get("https://portal.sat.gob.gt/portal/verificador-integrado/")
+    driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
     messages = scraper_initial_captcha(driver)
     while (len(messages.find_elements_by_xpath(".//*")) > 0):
         messages = scraper_initial_captcha(driver)
@@ -159,14 +160,15 @@ def scraper_task(self, nit_list):
 @task_success.connect
 def task_success_handler(sender, result, **kwargs):
     print (sender, result)
-    with app.producer_or_acquire() as producer:
-        producer.publish(
-            body=result,
-            serializer='json',
-            exchange='celery',
-            routing_key='sat-scraper-result',
-            retry=True,
+    with celery.producer_or_acquire() as producer:
+        r = producer.publish(
+            result,
+            exchange=my_queue.exchange,
+            routing_key=my_queue.routing_key,
+            declare=[my_queue],
         )
+        print ('pub')
+        print (r)
 
 @app.route('/', methods=['GET'])
 def index():
