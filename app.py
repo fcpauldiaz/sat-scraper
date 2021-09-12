@@ -52,7 +52,6 @@ celery = Celery(app.name, broker=app.config['broker_url'],
 celery.conf.update(app.config)
 
 
-my_queue = Queue('sat-scraper-result', Exchange('sat-scraper-result'), 'routing_key')
 def sendKeys(elem, string):
     for letter in string:
         time.sleep(0.4)
@@ -87,6 +86,7 @@ def scraper_initial_captcha(driver):
 def scraper_nit(driver, nit):
     results = []
     label = None
+    time.sleep(0.2)
     try:
         label = driver.find_element_by_id("formContent:selTipoConsulta_label")
     except:
@@ -160,7 +160,6 @@ def scraper_task(self, nit_list):
 
 @task_success.connect
 def task_success_handler(sender, result, **kwargs):
-    print (sender, result)
     requests.post(environ.get('BACKEND_URL') + "/api/scraper/result", json = result)
     # with celery.producer_or_acquire() as producer:
     #     r = producer.publish(
@@ -214,6 +213,6 @@ def taskstatus(task_id):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)
 
 
