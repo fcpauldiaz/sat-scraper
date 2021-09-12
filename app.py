@@ -13,12 +13,20 @@ import time
 import base64
 from captcha_solver import CaptchaSolver
 import redis
-from kombu import Consumer, Exchange, Queue
+import pusher
+
 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = environ.get('SECRET_KEY')
 load_dotenv()
+pusher_client = pusher.Pusher(
+  app_id=environ.get('APP_ID'),
+  key=environ.get('API_KEY'),
+  secret=environ.get('APP_SECRET'),
+  cluster='us2',
+  ssl=True
+)
 
 # Celery configuration
 app.config['broker_url'] = environ.get('REDISCLOUD_URL')
@@ -51,7 +59,6 @@ celery = Celery(app.name, broker=app.config['broker_url'],
 celery.conf.update(app.config)
 
 
-my_queue = Queue('sat-scraper-result', Exchange('sat-scraper-result'), 'routing_key')
 def sendKeys(elem, string):
     for letter in string:
         time.sleep(0.4)
@@ -75,7 +82,7 @@ def scraper_initial_captcha(driver):
     raw_data = open('captcha.jpg', 'rb').read()
     captcha_solution = solver.solve_captcha(raw_data)
     print (captcha_solution)
-    input_element = driver.find_element_by_id("formContent:j_idt29")
+    input_element = driver.find_element_by_id("formContent:j_idt28")
     sendKeys(input_element, captcha_solution)
     input_element.send_keys(Keys.ENTER)
     time.sleep(0.5)
@@ -86,6 +93,7 @@ def scraper_initial_captcha(driver):
 def scraper_nit(driver, nit):
     results = []
     label = None
+    time.sleep(0.5)
     try:
         label = driver.find_element_by_id("formContent:selTipoConsulta_label")
     except:
@@ -155,20 +163,11 @@ def scraper_task(self, nit_list):
         results.append({ 'result': result, 'nit': nit })
         count += 1
     driver.quit()
-    return {'progress': 100, 'result': results}
+    return {'progress': 100, 'users': results}
 
 @task_success.connect
 def task_success_handler(sender, result, **kwargs):
-    print (sender, result)
-    with celery.producer_or_acquire() as producer:
-        r = producer.publish(
-            result,
-            exchange=my_queue.exchange,
-            routing_key=my_queue.routing_key,
-            declare=[my_queue],
-        )
-        print ('pub')
-        print (r)
+   pusher_client.trigger('scraper', 'result', result)
 
 @app.route('/', methods=['GET'])
 def index():
