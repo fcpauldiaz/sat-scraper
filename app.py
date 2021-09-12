@@ -171,10 +171,6 @@ def task_success_handler(sender, result, **kwargs):
     #     print ('pub')
     #     print (r)
 
-@app.route('/', methods=['GET'])
-def index():
-    return render_template('index.html')
-
 
 @app.route('/scraper', methods=['POST'])
 def api_scraper():
@@ -201,8 +197,8 @@ def taskstatus(task_id):
             'progress': task.info.get('progress', 0),
             'status': task.info.get('status', '')
         }
-        if 'result' in task.info:
-            response['result'] = task.info['result']
+        if 'users' in task.info:
+            response['users'] = task.info['users']
     else:
         # something went wrong in the background job
         response = {
