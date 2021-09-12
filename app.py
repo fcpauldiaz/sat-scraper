@@ -14,6 +14,7 @@ import base64
 from captcha_solver import CaptchaSolver
 import redis
 from kombu import Consumer, Exchange, Queue
+import requests
 
 
 app = Flask(__name__)
@@ -75,7 +76,7 @@ def scraper_initial_captcha(driver):
     raw_data = open('captcha.jpg', 'rb').read()
     captcha_solution = solver.solve_captcha(raw_data)
     print (captcha_solution)
-    input_element = driver.find_element_by_id("formContent:j_idt29")
+    input_element = driver.find_element_by_id("formContent:j_idt28")
     sendKeys(input_element, captcha_solution)
     input_element.send_keys(Keys.ENTER)
     time.sleep(0.5)
@@ -112,7 +113,7 @@ def scraper_nit(driver, nit):
     driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
     result = driver.find_element_by_id("formContent:j_idt23")
     if "NO" in result.text:
-        pass
+        results.append(str(result.text))
     else:
         table = driver.find_element_by_id("formContent:pnlGridIncum")
         for row in table.find_elements_by_xpath(".//tr"):
@@ -149,26 +150,27 @@ def scraper_task(self, nit_list):
     count = 0
     results = []
     for nit in nit_list:
-        print (nit)
         self.update_state(state='PROGRESS', meta={'progress': int(count/len(nit_list)), "nit": nit})
         result = scraper_nit(driver,  nit)
-        results.append({ 'result': result, 'nit': nit })
+        for flatResult in result:
+            results.append({ 'result': flatResult, 'nit': nit })
         count += 1
     driver.quit()
-    return {'progress': 100, 'result': results}
+    return {'progress': 100, 'users': results}
 
 @task_success.connect
 def task_success_handler(sender, result, **kwargs):
     print (sender, result)
-    with celery.producer_or_acquire() as producer:
-        r = producer.publish(
-            result,
-            exchange=my_queue.exchange,
-            routing_key=my_queue.routing_key,
-            declare=[my_queue],
-        )
-        print ('pub')
-        print (r)
+    requests.post(environ.get('BACKEND_URL') + "/api/scraper/result", json = result)
+    # with celery.producer_or_acquire() as producer:
+    #     r = producer.publish(
+    #         result,
+    #         exchange=my_queue.exchange,
+    #         routing_key=my_queue.routing_key,
+    #         declare=[my_queue],
+    #     )
+    #     print ('pub')
+    #     print (r)
 
 @app.route('/', methods=['GET'])
 def index():
